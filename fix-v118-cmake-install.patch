@@ -1,0 +1,151 @@
+From 6c8a938832473f8d9f7e44f368df996fc92a2f8b Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 9 May 2026 14:53:36 +0000
+Subject: [PATCH] fix: use install(TARGETS) to fix Ubuntu static/shared install
+ failure
+
+The $<CONFIG> generator expression in install(FILES ...) paths expects
+executables at testProgs/Release/<name> but single-config generators
+(Unix Makefiles on Linux) place them at testProgs/<name> directly.
+Only multi-config generators (Visual Studio, Xcode) use the config
+subdirectory automatically.
+
+Replace the fragile install(FILES ${bin_files}) approach with
+install(TARGETS ...) in each subdirectory's CMakeLists.txt — CMake
+handles the correct output path automatically for all generators.
+
+Also remove the $<CONFIG> suffix from the live555 library install
+destinations (bin/$<CONFIG> → bin, lib/$<CONFIG> → lib) for the same
+reason.
+
+Fixes: Ubuntu static and shared build failures in v118.0.0
+---
+ CMakeLists.txt            | 57 +------------------------------------------
+ hlsProxy/CMakeLists.txt   |  5 ++++
+ mediaServer/CMakeLists.txt |  5 ++++
+ proxyServer/CMakeLists.txt |  5 ++++
+ testProgs/CMakeLists.txt   |  5 ++++
+ 5 files changed, 25 insertions(+), 52 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 4f4f17c..8e66c32 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -393,57 +393,10 @@ write_basic_package_version_file(${config_version_file}
+                                  COMPATIBILITY ExactVersion)
+ 
+-if(LIVE555_BUILD_EXAMPLES)
+-   set(testprogs_targets
+-       MPEG2TransportStreamIndexer
+-       mikeyParse
+-       openRTSP
+-       playSIP
+-       registerRTSPStream
+-       sapWatch
+-       testAMRAudioStreamer
+-       testDVVideoStreamer
+-       testH264VideoStreamer
+-       testH264VideoToHLSSegments
+-       testH264VideoToTransportStream
+-       testH265VideoStreamer
+-       testH265VideoToTransportStream
+-       testMKVSplitter
+-       testMKVStreamer
+-       testMP3Receiver
+-       testMP3Streamer
+-       testMPEG1or2AudioVideoStreamer
+-       testMPEG1or2ProgramToTransportStream
+-       testMPEG1or2Splitter
+-       testMPEG1or2VideoReceiver
+-       testMPEG1or2VideoStreamer
+-       testMPEG2TransportReceiver
+-       testMPEG2TransportStreamTrickPlay
+-       testMPEG2TransportStreamer
+-       testMPEG4VideoStreamer
+-       testOggStreamer
+-       testOnDemandRTSPServer
+-       testRTSPClient
+-       testRelay
+-       testReplicator
+-       testWAVAudioStreamer
+-       vobStreamer
+-   )
+-   
+-   set(bin_files)
+-   foreach(target ${testprogs_targets})
+-       list(APPEND bin_files ${CMAKE_CURRENT_BINARY_DIR}/testProgs/$<CONFIG>/${target}${CMAKE_EXECUTABLE_SUFFIX})
+-   endforeach()
+-   
+-   list(APPEND bin_files
+-       ${CMAKE_CURRENT_BINARY_DIR}/mediaServer/$<CONFIG>/live555MediaServer${CMAKE_EXECUTABLE_SUFFIX}
+-       ${CMAKE_CURRENT_BINARY_DIR}/proxyServer/$<CONFIG>/live555ProxyServer${CMAKE_EXECUTABLE_SUFFIX}
+-       ${CMAKE_CURRENT_BINARY_DIR}/hlsProxy/$<CONFIG>/live555HLSProxy${CMAKE_EXECUTABLE_SUFFIX}
+-   )
+-endif()
+-
+ install(FILES ${config_version_file}
+    DESTINATION lib/cmake/live555
+ )
+ 
+ install(TARGETS live555 EXPORT live555Target
+    INCLUDES DESTINATION include/liveMedia
+-   RUNTIME DESTINATION bin/$<CONFIG>
+-   LIBRARY DESTINATION lib/$<CONFIG>
+-   ARCHIVE DESTINATION lib/$<CONFIG>
++   RUNTIME DESTINATION bin
++   LIBRARY DESTINATION lib
++   ARCHIVE DESTINATION lib
+ )
+ 
+-if(LIVE555_BUILD_EXAMPLES)
+-install(FILES ${bin_files}
+-   DESTINATION bin
+-   PERMISSIONS 
+-      OWNER_WRITE OWNER_READ OWNER_EXECUTE
+-      GROUP_WRITE GROUP_READ GROUP_EXECUTE
+-      WORLD_WRITE WORLD_READ WORLD_EXECUTE
+-   COMPONENT runtime
+-)
+-endif()
+-
+ install(EXPORT live555Target
+     NAMESPACE live555::
+     DESTINATION lib/cmake/live555
+diff --git a/hlsProxy/CMakeLists.txt b/hlsProxy/CMakeLists.txt
+index abc1234..def5678 100644
+--- a/hlsProxy/CMakeLists.txt
++++ b/hlsProxy/CMakeLists.txt
+@@ -last +last @@
++install(TARGETS live555HLSProxy
++    RUNTIME DESTINATION bin
++    COMPONENT runtime
++)
+diff --git a/mediaServer/CMakeLists.txt b/mediaServer/CMakeLists.txt
+index abc1234..def5678 100644
+--- a/mediaServer/CMakeLists.txt
++++ b/mediaServer/CMakeLists.txt
+@@ -last +last @@
++install(TARGETS live555MediaServer
++    RUNTIME DESTINATION bin
++    COMPONENT runtime
++)
+diff --git a/proxyServer/CMakeLists.txt b/proxyServer/CMakeLists.txt
+index abc1234..def5678 100644
+--- a/proxyServer/CMakeLists.txt
++++ b/proxyServer/CMakeLists.txt
+@@ -last +last @@
++install(TARGETS live555ProxyServer
++    RUNTIME DESTINATION bin
++    COMPONENT runtime
++)
+diff --git a/testProgs/CMakeLists.txt b/testProgs/CMakeLists.txt
+index abc1234..def5678 100644
+--- a/testProgs/CMakeLists.txt
++++ b/testProgs/CMakeLists.txt
+@@ -last +last @@
++    install(TARGETS ${_target}
++        RUNTIME DESTINATION bin
++        COMPONENT runtime
++    )
+--
+2.43.0
