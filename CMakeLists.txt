@@ -14,6 +14,55 @@ project(live555
 )
 message(STATUS "live555 version: ${project_version}")
 
+# Decide on the standard to use
+if(MDARRAY_CXX_STANDARD STREQUAL "17")
+  if("cxx_std_17" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+    message(STATUS "Using C++17 standard")
+    set(NO_STD_LIB TRUE)
+    set(CMAKE_CXX_STANDARD 17)
+  else()
+    message(FATAL_ERROR "Requested MDARRAY_CXX_STANDARD \"17\" not supported by provided C++ compiler")
+  endif()
+elseif(MDARRAY_CXX_STANDARD STREQUAL "14")
+  if("cxx_std_14" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+    message(STATUS "Using C++14 standard")
+    set(NO_STD_LIB TRUE)
+    set(CMAKE_CXX_STANDARD 14)
+  else()
+    message(FATAL_ERROR "Requested MDARRAY_CXX_STANDARD \"14\" not supported by provided C++ compiler")
+  endif()
+elseif(MDARRAY_CXX_STANDARD STREQUAL "11")
+  message(STATUS "Using C++11 standard")
+  set(NO_STD_LIB TRUE)
+  set(CMAKE_CXX_STANDARD 11)
+elseif(MDARRAY_CXX_STANDARD STREQUAL "20")
+  if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+    message(STATUS "Using C++20 standard")
+    set(CMAKE_CXX_STANDARD 20)
+  else()
+    message(FATAL_ERROR "Requested MDARRAY_CXX_STANDARD \"20\" not supported by provided C++ compiler")
+  endif()
+else()
+  if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+    set(CMAKE_CXX_STANDARD 20)
+    message(STATUS "Detected support for C++20 standard")
+  elseif("cxx_std_17" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+    set(NO_STD_LIB TRUE)
+    set(CMAKE_CXX_STANDARD 17)
+    message(STATUS "Detected support for C++17 standard")
+  elseif("cxx_std_14" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+    set(NO_STD_LIB TRUE)
+    set(CMAKE_CXX_STANDARD 14)
+    message(STATUS "Detected support for C++14 standard")
+  elseif("cxx_std_11" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+    set(NO_STD_LIB TRUE)
+    set(CMAKE_CXX_STANDARD 11)
+    message(STATUS "Newest supported C++ standard detected is C++11.")
+  else()
+    message(FATAL_ERROR "Cannot detect CXX_STANDARD of C++11 or newer.")
+  endif()
+endif()
+
 list(APPEND CMAKE_MODULE_PATH ${live555_SOURCE_DIR}/cmake)
 include(TargetVersion)
 
@@ -67,11 +116,19 @@ endif()
 if ( LIVE555_ENABLE_OPENSSL )
     message(STATUS "find package OpenSSL.")
     set(EMSCRIPTEN_ROOT_PATH "$ENV{SYSROOT}")
-    find_package(OpenSSL 1.1.1 REQUIRED COMPONENTS Crypto SSL)
-    target_link_libraries(live555_cxx_flags INTERFACE
+    if(WIN32)
+      find_package(OpenSSL REQUIRED COMPONENTS Crypto SSL)
+      target_link_libraries(live555_cxx_flags INTERFACE
+         OpenSSL::SSL
+         OpenSSL::Crypto
+      )
+    else ()
+      find_package(OpenSSL 1.1.1 REQUIRED COMPONENTS Crypto SSL)
+      target_link_libraries(live555_cxx_flags INTERFACE
         OpenSSL::Crypto
         OpenSSL::SSL
-    )
+      )
+    endif()
 else()
     message(STATUS "build without OpenSSL.")
     target_compile_definitions(live555_cxx_flags INTERFACE NO_OPENSSL=1)
@@ -108,6 +165,10 @@ if(WIN32)
 else()
     set(EMCC_SUFFIX "")
 endif()
+
+if ( USE_DEPRECATED_GETHOSTBYNAME )
+   set ( USE_DEPRECATED_GETHOSTBYNAME TRUE )
+endif ( USE_DEPRECATED_GETHOSTBYNAME )
 
 # Check version
 set(EMSCRIPTEN_REQUIRED_VERSION 1.21.4)
@@ -222,7 +283,41 @@ endif()
 if(LIVE555_MONOLITH_BUILD)
    message(STATUS "Shared library")
    
-   add_library(live555 SHARED dummy.cpp)
+
+   if(TARGET EpollTaskScheduler)
+      add_library(live555 SHARED
+         $<TARGET_OBJECTS:UsageEnvironment>
+         $<TARGET_OBJECTS:groupsock>
+         $<TARGET_OBJECTS:BasicUsageEnvironment>
+         $<TARGET_OBJECTS:liveMedia>
+         $<TARGET_OBJECTS:EpollTaskScheduler>
+      )
+      target_include_directories(live555 INTERFACE
+         $<BUILD_INTERFACE:${live555_SOURCE_DIR}/UsageEnvironment/include>
+         $<BUILD_INTERFACE:${live555_SOURCE_DIR}/groupsock/include>
+         $<BUILD_INTERFACE:${live555_SOURCE_DIR}/BasicUsageEnvironment/include>
+         $<BUILD_INTERFACE:${live555_SOURCE_DIR}/liveMedia/include>
+         $<BUILD_INTERFACE:${live555_SOURCE_DIR}/EpollTaskScheduler/include>
+      )
+      add_library(live555::EpollTaskScheduler ALIAS live555)
+   else()
+      add_library(live555 SHARED
+         $<TARGET_OBJECTS:UsageEnvironment>
+         $<TARGET_OBJECTS:groupsock>
+         $<TARGET_OBJECTS:BasicUsageEnvironment>
+         $<TARGET_OBJECTS:liveMedia>
+      )
+      target_include_directories(live555 INTERFACE
+         $<BUILD_INTERFACE:${live555_SOURCE_DIR}/UsageEnvironment/include>
+         $<BUILD_INTERFACE:${live555_SOURCE_DIR}/groupsock/include>
+         $<BUILD_INTERFACE:${live555_SOURCE_DIR}/BasicUsageEnvironment/include>
+         $<BUILD_INTERFACE:${live555_SOURCE_DIR}/liveMedia/include>
+      )
+   endif()
+
+    if(MSVC)
+        target_link_libraries(live555 PUBLIC ws2_32)
+    endif()
    set ( WS_LINK_LIBRARIES "" )
    if ( WIN32 )
       list ( APPEND WS_LINK_LIBRARIES
@@ -230,15 +325,25 @@ if(LIVE555_MONOLITH_BUILD)
       )
       set(LIB_EXTENSION ".dll")
    endif ()
-   target_link_libraries(live555 PUBLIC
-      UsageEnvironment
-      groupsock
-      BasicUsageEnvironment
-      liveMedia
-   )
-   if(TARGET EpollTaskScheduler)
-      target_link_libraries(live555 PUBLIC EpollTaskScheduler)
-      add_library(live555::EpollTaskScheduler ALIAS EpollTaskScheduler)
+   if(LIVE555_ENABLE_OPENSSL)
+      message(STATUS "find package OpenSSL.")
+      find_package(OpenSSL REQUIRED COMPONENTS Crypto SSL)
+
+      if(OpenSSL_FOUND)
+         message(STATUS "=============================================================")
+         message(STATUS "OpenSSL Notification.")
+         message(STATUS "Using OpenSSL ${OPENSSL_VERSION}")
+         message(STATUS "OpenSSL Include Dir: ${OPENSSL_INCLUDE_DIR}")
+         message(STATUS "OpenSSL Libs: ${OPENSSL_LIBRARIES}")
+         message(STATUS "=============================================================")
+         target_link_libraries(live555 PUBLIC
+            OpenSSL::SSL
+            OpenSSL::Crypto
+         )
+      endif(OpenSSL_FOUND)
+   else()
+      message(STATUS "build without OpenSSL.")
+      target_compile_definitions(live555 INTERFACE NO_OPENSSL=1)
    endif()
    add_library(live555::live555 ALIAS live555)
    add_library(live555::UsageEnvironment ALIAS live555)
@@ -253,6 +358,7 @@ if(LIVE555_MONOLITH_BUILD)
    )
    set_target_properties(live555 PROPERTIES FOLDER "live555")
 else()
+   message(STATUS "Static library")
     add_library(live555 INTERFACE)
     add_library(live555::live555 ALIAS live555)
     target_link_libraries(live555 INTERFACE
@@ -266,6 +372,15 @@ else()
     endif()
 endif()
 
+if ( LIVE555_MONOLITH_BUILD )
+   if(MSVC)
+      target_compile_definitions(live555 INTERFACE LIVEMEDIA_API=__declspec\(dllimport\))
+   else()
+      target_compile_definitions(live555 INTERFACE LIVEMEDIA_API=)
+   endif()
+else ()
+   target_compile_definitions(live555 INTERFACE LIVEMEDIA_API=)
+endif ()
 
 # Installation stuff
 set(config_version_file ${CMAKE_CURRENT_BINARY_DIR}/live555ConfigVersion.cmake)
@@ -275,66 +390,16 @@ write_basic_package_version_file(${config_version_file}
                                  VERSION ${live555_VERSION}
                                  COMPATIBILITY ExactVersion)
 
-if(LIVE555_BUILD_EXAMPLES)
-   set(bin_files ${CMAKE_CURRENT_BINARY_DIR}/testProgs/MPEG2TransportStreamIndexer
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/mikeyParse
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/openRTSP
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/playSIP
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/registerRTSPStream
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/sapWatch
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testAMRAudioStreamer
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testDVVideoStreamer
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testH264VideoStreamer
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testH264VideoToHLSSegments
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testH264VideoToTransportStream
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testH265VideoStreamer
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testH265VideoToTransportStream
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testMKVSplitter
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testMKVStreamer
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testMP3Receiver
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testMP3Streamer
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testMPEG1or2AudioVideoStreamer
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testMPEG1or2ProgramToTransportStream
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testMPEG1or2Splitter
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testMPEG1or2VideoReceiver
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testMPEG1or2VideoStreamer
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testMPEG2TransportReceiver
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testMPEG2TransportStreamTrickPlay
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testMPEG2TransportStreamer
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testMPEG4VideoStreamer
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testOggStreamer
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testOnDemandRTSPServer
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testRTSPClient
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testRelay
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testReplicator
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/testWAVAudioStreamer
-                 ${CMAKE_CURRENT_BINARY_DIR}/testProgs/vobStreamer
-                 ${CMAKE_CURRENT_BINARY_DIR}/mediaServer/live555MediaServer
-                 ${CMAKE_CURRENT_BINARY_DIR}/proxyServer/live555ProxyServer
-                 ${CMAKE_CURRENT_BINARY_DIR}/hlsProxy/live555HLSProxy)
-endif()
-
 install(FILES ${config_version_file}
    DESTINATION lib/cmake/live555
 )
 
 install(TARGETS live555 EXPORT live555Target
    INCLUDES DESTINATION include/liveMedia
-   RUNTIME DESTINATION bin/$<CONFIG>
-   LIBRARY DESTINATION lib/$<CONFIG>
-   ARCHIVE DESTINATION lib/$<CONFIG>
+   RUNTIME DESTINATION bin
+   LIBRARY DESTINATION lib
+   ARCHIVE DESTINATION lib
 )
-
-if(LIVE555_BUILD_EXAMPLES)
-install(FILES ${bin_files}
-   DESTINATION bin
-   PERMISSIONS 
-      OWNER_WRITE OWNER_READ OWNER_EXECUTE
-      GROUP_WRITE GROUP_READ GROUP_EXECUTE
-      WORLD_WRITE WORLD_READ WORLD_EXECUTE
-   COMPONENT runtime
-)
-endif()
 
 install(EXPORT live555Target
     NAMESPACE live555::
